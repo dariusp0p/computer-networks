@@ -1,11 +1,7 @@
-// ServerSuma-Iterativ.cpp : Defines the entry point for the console application.
-//
-
 #define _WINSOCK_DEPRECATED_NO_WARNINGS 1
-// exists on all platforms
+
 #include <stdio.h>
 
-// this section will only be compiled on NON Windows platforms
 #ifndef _WIN32
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -13,7 +9,6 @@
 #include <netinet/ip.h>
 #include <string.h>
 #include <arpa/inet.h>
-
 
 #include <unistd.h>
 #include <errno.h>

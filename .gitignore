@@ -1,0 +1,28 @@
+# CMake build directories
+cmake-build-*
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# CLion project files
+.idea/
+*.iml
+
+# macOS system files
+.DS_Store
+
+# Compiled object files and executables
+*.o
+*.out
+*.exe
+*.a
+*.so
+*.dylib
+
+# Logs and temporary files
+*.log
+*.tmp
+
+lab*/cmake-build-debug/*
