@@ -1,0 +1,4 @@
+# ninja log v6
+309	472	1759837061689575256	computer_networks	8c782f908cab9a46
+1	308	1759837061381227916	CMakeFiles/computer_networks.dir/client.c.o	c4f0a958fec7f706
+2	72	1759837219094665503	build.ninja	9b1caee14810788b
