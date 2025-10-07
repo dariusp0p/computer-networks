@@ -4,3 +4,7 @@ project(computer_networks C)
 set(CMAKE_C_STANDARD 11)
 
 add_executable(computer_networks lab1/server_1.c)
+
+if(WIN32)
+    target_link_libraries(computer_networks Ws2_32)
+endif()

@@ -18,7 +18,7 @@
   typedef int SOCKET;
 #else
   #include<WinSock2.h>
-  #include<cstdint>
+  #include<stdint.h>
 #endif
 
 int main() {
@@ -68,7 +68,7 @@ int main() {
       continue;
     }
 
-    printf("Incomming connected client from: %s:%d", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+    printf("Incomming connected client from: %s:%d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 
     res = recv(cl, (char*)&arr_size, sizeof(arr_size), 0);
     if (res != sizeof(arr_size)) {

@@ -18,8 +18,7 @@ typedef int SOCKET;
 #else
 // on Windows include and link these things
 #include<WinSock2.h>
-// for uint16_t an so
-#include<cstdint>
+#include<stdint.h>
 
 // this is how we can link a library directly from the source code with the VC++ compiler – otherwise got o project settings and link to it explicitly
 //#pragma comment(lib,"Ws2_32.lib")
