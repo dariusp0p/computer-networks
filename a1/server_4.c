@@ -27,8 +27,7 @@
 int main() {
     SOCKET sock;
     struct sockaddr_in server, client;
-    socklen_t len;
-    int cl, err;
+    int cl, len, err;
 
 #ifdef _WIN32
     WSADATA wsa_data;
@@ -76,6 +75,7 @@ int main() {
         printf("Connected client: %s:%d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 
         recv(cl, &size, sizeof(size), 0);
+        if (size >= sizeof(buffer1)) size = sizeof(buffer1) - 1;
         rec = 0;
         while (rec < size) {
             res = recv(cl, buffer1 + rec, size - rec, 0);
@@ -85,6 +85,7 @@ int main() {
         buffer1[size] = '\0';
 
         recv(cl, &size, sizeof(size), 0);
+        if (size >= sizeof(buffer1)) size = sizeof(buffer1) - 1;
         rec = 0;
         while (rec < size) {
             res = recv(cl, buffer2 + rec, size - rec, 0);
@@ -94,22 +95,22 @@ int main() {
         buffer2[size] = '\0';
 
         int i = 0, j = 0, k = 0;
-        while (i < strlen(buffer1) && j < strlen(buffer2)) {
+        while (i < strlen(buffer1) && j < strlen(buffer2) && k < sizeof(result) - 1) {
             if (buffer1[i] <= buffer2[j]) {
                 result[k++] = buffer1[i++];
             } else {
                 result[k++] = buffer2[j++];
             }
         }
-        while (i < strlen(buffer1))
+        while (i < strlen(buffer1) && k < sizeof(result) - 1)
             result[k++] = buffer1[i++];
-        while (j < strlen(buffer2))
+        while (j < strlen(buffer2) && k < sizeof(result) - 1)
             result[k++] = buffer2[j++];
         result[k] = '\0';
 
         size = strlen(result);
-        send(sock, &size, sizeof(size), 0);
-        send(sock, result, size, 0);
+        send(cl, &size, sizeof(size), 0);
+        send(cl, result, size, 0);
 
         closesocket(cl);
     }
