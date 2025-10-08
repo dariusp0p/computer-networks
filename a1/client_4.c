@@ -56,9 +56,19 @@ int main() {
     }
     printf("Connection successfull!\n");
 
-    FILE* fd = fopen("input_4.txt", "r");
+    FILE* fd = fopen("../a1/input_4.txt", "r");
+    if (!fd) {
+        perror("Error opening input_4.txt");
+        closesocket(sock);
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return 1;
+    }
     fscanf(fd, "%31s %31s", arr1, arr2);
     fclose(fd);
+
+    printf("Finnished reading file!\n");
 
     size = strlen(arr1);
     send(sock, &size, sizeof(size), 0);
@@ -67,10 +77,19 @@ int main() {
     send(sock, &size, sizeof(size), 0);
     send(sock, arr2, size, 0);
 
-    recv(sock, &size, sizeof(size), 0);
-    recv(sock, result, size, 0);
+    printf("Sent arrays to servers!\n");
 
-    printf("Result is: %63s", result);
+    recv(sock, &size, sizeof(size), 0);
+
+    uint32_t rec = 0, res;
+    while (rec < size) {
+        res = recv(sock, result + rec, size - rec, 0);
+        if (res <= 0) break;
+        rec += res;
+    }
+    result[size] = '\0';
+
+    printf("Result is: %s\n", result);
 
     closesocket(sock);
 #ifdef _WIN32
