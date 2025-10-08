@@ -46,14 +46,14 @@ int main() {
     memset(&server, 0, sizeof(server));
     server.sin_port = htons(1234);
     server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("172.30.244.3");
+    server.sin_addr.s_addr = inet_addr("192.168.1.10");
 
-    printf("Trying to connect to server: %s:%d", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
+    printf("Trying to connect to server: %s:%d\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
     if (connect(sock, (struct sockaddr *) &server, sizeof(server)) < 0) {
         printf("Server connection error!\n");
         return 1;
     }
-    printf("Connection successfull!");
+    printf("Connection successfull!\n");
 
     printf("Enter a string: ");
     fgets(buffer, sizeof(buffer), stdin);
@@ -61,8 +61,7 @@ int main() {
     send(sock, buffer, sizeof(buffer), 0);
     recv(sock, &spaces, sizeof(spaces), 0);
 
-    spaces = ntohs(spaces);
-    printf("The string has %hhu spaces!", spaces);
+    printf("The string has %hhu spaces!\n", spaces);
 
 
 
