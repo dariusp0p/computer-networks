@@ -24,8 +24,7 @@
 int main() {
     SOCKET sock;
     struct sockaddr_in server, client;
-    socklen_t len;
-    int cl, err;
+    int cl, len, err;
 
 #ifdef _WIN32
     WSADATA wsa_data;
