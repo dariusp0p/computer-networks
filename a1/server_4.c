@@ -60,7 +60,7 @@ int main() {
 
     while (1) {
         char buffer1[32], buffer2[32], result[64];
-        int res;
+        int res, rec;
         uint32_t size;
 
         printf("Listening for incomming connections...\n");
@@ -76,12 +76,22 @@ int main() {
         printf("Connected client: %s:%d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 
         recv(cl, &size, sizeof(size), 0);
-        res = recv(cl, buffer1, size, 0);
-        if (res != size) printf("Error receiving first array!\n");
+        rec = 0;
+        while (rec < size) {
+            res = recv(cl, buffer1 + rec, size - rec, 0);
+            if (res <= 0) break;
+            rec += res;
+        }
+        buffer1[size] = '\0';
 
         recv(cl, &size, sizeof(size), 0);
-        res = recv(cl, buffer2, size, 0);
-        if (res != size) printf("Error receiving second array!\n");
+        rec = 0;
+        while (rec < size) {
+            res = recv(cl, buffer2 + rec, size - rec, 0);
+            if (res <= 0) break;
+            rec += res;
+        }
+        buffer2[size] = '\0';
 
         int i = 0, j = 0, k = 0;
         while (i < strlen(buffer1) && j < strlen(buffer2)) {
