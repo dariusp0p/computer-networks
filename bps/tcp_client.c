@@ -1,5 +1,3 @@
-// 2.A client sends to the server a string. The server returns the count of spaces in the string.
-
 #define _WINSOCK_DEPRECATED_NO_WARNINGS 1
 
 #include <stdio.h>
@@ -18,16 +16,17 @@
     #define closesocket close
     typedef int SOCKET;
 #else
-    #include <WinSock2.h>
-    #include <stdint.h>
+#include <WinSock2.h>
+#include <stdint.h>
 #endif
 
 
 int main() {
     SOCKET sock;
     struct sockaddr_in server;
-    char buffer[256];
-    uint8_t spaces;
+
+    // variables go here
+
 
 #ifdef _WIN32
     WSADATA wsa_data;
@@ -46,7 +45,7 @@ int main() {
     memset(&server, 0, sizeof(server));
     server.sin_port = htons(1234);
     server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("192.168.1.10");
+    server.sin_addr.s_addr = inet_addr("ip address goes here"); // dont't forget
 
     printf("Trying to connect to server: %s:%d\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
     if (connect(sock, (struct sockaddr *) &server, sizeof(server)) < 0) {
@@ -55,18 +54,11 @@ int main() {
     }
     printf("Connection successfull!\n");
 
-    printf("Enter a string: ");
-    fgets(buffer, sizeof(buffer), stdin);
-
+    char buffer[1024] = {0};
     send(sock, buffer, sizeof(buffer), 0);
-    recv(sock, &spaces, sizeof(spaces), 0);
-
-    printf("The string has %hhu spaces!\n", spaces);
+    recv(sock, &buffer, sizeof(buffer), 0);
 
     closesocket(sock);
-
-
-
 #ifdef _WIN32
     WSACleanup();
 #endif
