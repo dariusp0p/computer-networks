@@ -23,11 +23,16 @@
 #endif
 
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc != 3) {
+        printf("Usage: %s <YYYY-MM-DD> <server_ip>\n", argv[0]);
+        return 1;
+    }
+
     SOCKET sock;
     struct sockaddr_in server;
     int addr_len = sizeof(server);
-    char date_str[] = "2025-10-14";
+    char* date_str = argv[1];
     char buffer[1024] = {0};
 
 #ifdef _WIN32
@@ -47,7 +52,7 @@ int main() {
     memset(&server, 0, sizeof(server));
     server.sin_port = htons(1234);
     server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("172.30.244.221");
+    server.sin_addr.s_addr = inet_addr(argv[2]);
 
     sendto(sock, date_str, strlen(date_str) + 1, 0, (struct sockaddr*)&server, addr_len);
 

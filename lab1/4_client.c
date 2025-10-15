@@ -47,7 +47,7 @@ int main() {
     memset(&server, 0, sizeof(server));
     server.sin_port = htons(1234);
     server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("192.168.1.10"); // dont't forget
+    server.sin_addr.s_addr = inet_addr("172.30.244.221"); // dont't forget
 
     printf("Trying to connect to server: %s:%d\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
     if (connect(sock, (struct sockaddr *) &server, sizeof(server)) < 0) {
@@ -56,9 +56,9 @@ int main() {
     }
     printf("Connection successfull!\n");
 
-    FILE* fd = fopen("../a1/input_4.txt", "r");
+    FILE* fd = fopen("../a1/4_input.txt", "r");
     if (!fd) {
-        perror("Error opening input_4.txt");
+        perror("Error opening 4_input.txt");
         closesocket(sock);
 #ifdef _WIN32
         WSACleanup();

@@ -9,24 +9,21 @@
     #include <netinet/in.h>
     #include <netinet/ip.h>
     #include <arpa/inet.h>
-
     #include <unistd.h>
     #include <errno.h>
-
     #define closesocket close
     typedef int SOCKET;
 #else
-#include <WinSock2.h>
-#include <stdint.h>
+    #include <WinSock2.h>
+    #include <stdint.h>
 #endif
 
 
 int main() {
     SOCKET sock;
-    struct sockaddr_in server;
-
-    // variables go here
-
+    struct sockaddr_in server, client;
+    int len = sizeof(client);
+    int cl, err;
 
 #ifdef _WIN32
     WSADATA wsa_data;
@@ -36,28 +33,31 @@ int main() {
     }
 #endif
 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
-        printf("Error creating client socket!\n");
+        printf("Error creating server socket!\n");
         return 1;
     }
 
     memset(&server, 0, sizeof(server));
     server.sin_port = htons(1234);
     server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("ip address goes here"); // dont't forget
+    server.sin_addr.s_addr = INADDR_ANY;
 
-    printf("Trying to connect to server: %s:%d\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
-    if (connect(sock, (struct sockaddr *) &server, sizeof(server)) < 0) {
-        printf("Server connection error!\n");
+    if (bind(sock, (struct sockaddr *) &server, sizeof(server)) < 0) {
+        perror("Error binding!\n");
         return 1;
     }
-    printf("Connection successfull!\n");
 
-    char buffer[1024] = {0};
-    send(sock, buffer, sizeof(buffer), 0);
-    recv(sock, &buffer, sizeof(buffer), 0);
-
+    while (1) {
+        char buffer[1024];
+        int res = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, (struct sockaddr*)&client, &len);
+        if (res < 0) {
+            perror("Error receiving!\n");
+            continue;
+        }
+        sendto(sock, day, strlen(day) + 1, 0, (struct sockaddr*)&client, len);
+    }
     closesocket(sock);
 #ifdef _WIN32
     WSACleanup();

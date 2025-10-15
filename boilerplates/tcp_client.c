@@ -1,5 +1,3 @@
-// 5. The client sends to the server an integer. The server returns the list of divisors for the specified number.
-
 #define _WINSOCK_DEPRECATED_NO_WARNINGS 1
 
 #include <stdio.h>
@@ -11,10 +9,8 @@
     #include <netinet/in.h>
     #include <netinet/ip.h>
     #include <arpa/inet.h>
-
     #include <unistd.h>
     #include <errno.h>
-
     #define closesocket close
     typedef int SOCKET;
 #else
@@ -27,7 +23,7 @@ int main() {
     SOCKET sock;
     struct sockaddr_in server;
 
-    int x;
+    // variables go here
 
 #ifdef _WIN32
     WSADATA wsa_data;
@@ -46,7 +42,7 @@ int main() {
     memset(&server, 0, sizeof(server));
     server.sin_port = htons(1234);
     server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("172.30.244.221"); // dont't forget
+    server.sin_addr.s_addr = inet_addr("ip address goes here"); // dont't forget
 
     printf("Trying to connect to server: %s:%d\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
     if (connect(sock, (struct sockaddr *) &server, sizeof(server)) < 0) {
@@ -55,24 +51,9 @@ int main() {
     }
     printf("Connection successfull!\n");
 
-    printf("x = ");
-    scanf("%d", &x);
-    printf("The divisors of %d are: ", x);
-
-
-    int buffer = htonl(x);
-    send(sock, &buffer, sizeof(buffer), 0);
-
-    int res = recv(sock, (char*)&buffer, sizeof(buffer), 0);
-    if (res != sizeof(buffer)) printf("Error receiving nr of divisors!\n");
-    buffer = ntohl(buffer);
-
-    for (int i = 0; i < buffer; i++) {
-        int res = recv(sock, (char*)&buffer, sizeof(buffer), 0);
-        if (res != sizeof(buffer)) printf("Error receiving %dth divisor!\n", i);
-        buffer = ntohl(buffer);
-        printf("%d, ", buffer);
-    }
+    char buffer[1024] = {0};
+    send(sock, buffer, sizeof(buffer), 0);
+    recv(sock, &buffer, sizeof(buffer), 0);
 
     closesocket(sock);
 #ifdef _WIN32

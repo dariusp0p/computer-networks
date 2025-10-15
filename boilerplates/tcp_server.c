@@ -9,10 +9,8 @@
     #include <netinet/in.h>
     #include <netinet/ip.h>
     #include <arpa/inet.h>
-
     #include <unistd.h>
     #include <errno.h>
-
     #define closesocket close
     typedef int SOCKET;
 #else
