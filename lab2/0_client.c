@@ -17,8 +17,8 @@
     #define closesocket close
     typedef int SOCKET;
 #else
-    #include <windows.h>
     #include <WinSock2.h>
+    #include <windows.h>
 #endif
 
 #define MAX 100
