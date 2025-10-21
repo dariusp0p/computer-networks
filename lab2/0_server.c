@@ -75,6 +75,7 @@ void handle_client() {
 
     alarm(0);
 
+    result--;
     result = htonl(result);
     send(conn, &result, sizeof(int32_t), 0);
     result = ntohl(result);
