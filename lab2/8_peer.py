@@ -11,22 +11,18 @@ import threading
 import time
 import atexit
 import sys
-from pathlib import Path
 import signal
 
 ANNOUNCE_INTERVAL = 60
 
 
 class Peer:
-    def __init__(self, server_host, server_port, peer_port=0, shared_dir="./shared"):
+    def __init__(self, server_host, server_port, peer_port=0):
         self.server_host = server_host
         self.server_port = server_port
         self.peer_port = int(peer_port)
-        self.shared_dir = Path(shared_dir).resolve()
-        self.shared_dir.mkdir(parents=True, exist_ok=True)
         self.running = threading.Event()
         self.running.set()
-        self.announce_thread = None
         self.server_thread = None
         self._server_socket = None
         self._server_lock = threading.Lock()
@@ -44,9 +40,8 @@ class Peer:
         except Exception:
             return None
 
-    def register(self):
-        files = [p.name for p in self.shared_dir.iterdir() if p.is_file()]
-        payload = {"action": "register", "peer_port": self.peer_port, "files": files}
+    def register(self, filenames):
+        payload = {"action": "register", "peer_port": self.peer_port, "files": filenames}
         resp = self._send_server(payload)
         if resp and resp.get("status") == "ok":
             print("registered with server")
@@ -63,17 +58,12 @@ class Peer:
         print("failed to unregister from server")
         return False
 
-    def announce(self):
-        files = [p.name for p in self.shared_dir.iterdir() if p.is_file()]
-        payload = {"action": "announce", "peer_port": self.peer_port, "files": files}
-        self._send_server(payload)  # best-effort
-
-    def lookup_file(self, filename):
-        payload = {"action": "request", "file": filename}
+    def get_peer(self, filename):
+        payload = {"action": "get", "filename": filename}
         resp = self._send_server(payload)
         if not resp or resp.get("status") != "ok":
-            return []
-        return resp.get("peers", [])
+            return {}
+        return resp.get("peer", {})
 
     def _handle_conn(self, conn, addr):
         fp = conn.makefile(mode="rwb")
@@ -90,46 +80,21 @@ class Peer:
 
             action = req.get("action")
 
-            # Simulated GET: reply with a single JSON message, no raw bytes
             if action == "get":
-                filename = req.get("file")
+                filename = req.get("filename")
                 if not filename:
                     resp = {"status": "error", "message": "missing file"}
                     fp.write((json.dumps(resp) + "\n").encode()); fp.flush()
                     return
 
-                requested = (self.shared_dir / filename).resolve()
-                try:
-                    requested.relative_to(self.shared_dir)
-                except Exception:
-                    resp = {"status": "error", "message": "access denied"}
-                    fp.write((json.dumps(resp) + "\n").encode()); fp.flush()
-                    return
-
-                if not requested.exists() or not requested.is_file():
-                    resp = {"status": "error", "message": "not found"}
-                    fp.write((json.dumps(resp) + "\n").encode()); fp.flush()
-                    return
-
-                # Return a dummy/simulated response instead of file bytes
                 resp = {
                     "status": "ok",
                     "simulated": True,
-                    "file": filename,
+                    "filename": filename,
                     "message": "this is a simulated transfer; no bytes sent"
                 }
                 fp.write((json.dumps(resp) + "\n").encode()); fp.flush()
                 return
-
-            # Keep a simple message handler for 'msg' if needed
-            if action == "msg":
-                text = req.get("text", "")
-                sender = f"{addr[0]}:{addr[1]}"
-                print(f"[msg] from {sender}: {text}")
-                resp = {"status": "ok", "received": True}
-                fp.write((json.dumps(resp) + "\n").encode()); fp.flush()
-                return
-
             resp = {"status": "error", "message": "unknown action"}
             fp.write((json.dumps(resp) + "\n").encode()); fp.flush()
             return
@@ -162,24 +127,13 @@ class Peer:
                 t = threading.Thread(target=self._handle_conn, args=(conn, addr), daemon=True)
                 t.start()
 
-    def _announce_loop(self):
-        while self.running.is_set():
-            try:
-                self.announce()
-            except Exception:
-                pass
-            for _ in range(int(ANNOUNCE_INTERVAL)):
-                if not self.running.is_set():
-                    break
-                time.sleep(1)
-
-    # client-side: simulate getting a file by reading the dummy JSON response
     def simulate_get_from_peer(self, peer_ip, peer_port, filename, timeout=5):
         try:
             with socket.create_connection((peer_ip, int(peer_port)), timeout=timeout) as s:
                 fp = s.makefile(mode="rwb")
-                req = {"action": "get", "file": filename}
-                fp.write((json.dumps(req) + "\n").encode()); fp.flush()
+                req = {"action": "get", "filename": filename}
+                fp.write((json.dumps(req) + "\n").encode())
+                fp.flush()
                 line = fp.readline()
                 if not line:
                     return False, "no response"
@@ -189,34 +143,28 @@ class Peer:
             return False, str(e)
 
     def get(self, filename):
-        peers = self.lookup_file(filename)
-        if not peers:
+        peer = self.get_peer(filename)
+        if not peer:
             print("server returned no peers for", filename)
             return False
-        for p in peers:
-            ip = p.get("ip")
-            port = p.get("port")
-            if ip == "0.0.0.0" or ip is None:
-                continue
-            print(f"connecting to {ip}:{port} ...")
-            ok, resp = self.simulate_get_from_peer(ip, port, filename)
-            if ok:
-                print("simulated response:", json.dumps(resp))
-                # announce to update tracker if desired
-                self.announce()
-                return True
-            else:
-                print("failed:", resp)
-        print("all peers failed")
+        ip = peer.get("ip")
+        port = peer.get("port")
+        if ip == "0.0.0.0" or ip is None:
+            return False
+        print(f"connecting to {ip}:{port} ...")
+        ok, resp = self.simulate_get_from_peer(ip, port, filename)
+        if ok:
+            print("simulated response:", json.dumps(resp))
+            return True
+        else:
+            print("failed:", resp)
         return False
 
     def start(self, register_on_start=False):
         self.server_thread = threading.Thread(target=self._file_server_loop, daemon=True)
         self.server_thread.start()
-        self.announce_thread = threading.Thread(target=self._announce_loop, daemon=True)
-        self.announce_thread.start()
         if register_on_start:
-            self.register()
+            self.register([])
 
     def stop(self):
         if self.running.is_set():
@@ -234,16 +182,13 @@ class Peer:
             time.sleep(0.2)
 
 
+
 def print_help():
     print("commands:")
     print("  help                show this help")
     print("  register            register with server")
     print("  unregister          unregister from server")
-    print("  list                list files known to server")
-    print("  peers <file>        show peers for <file>")
-    print("  files               list local shared files")
     print("  get <file>          simulate getting <file> from a peer (dummy message)")
-    print("  setdir <path>       change shared directory")
     print("  exit | quit         stop and exit")
 
 
@@ -253,7 +198,7 @@ def main():
     args = parser.parse_args()
 
     host, port = args.server.split(":", 1) if ":" in args.server else (args.server, "9000")
-    peer = Peer(host, int(port), peer_port=0, shared_dir="./shared")
+    peer = Peer(host, int(port), peer_port=0)
 
     def handle_exit(signum=None, frame=None):
         peer.stop()
@@ -264,10 +209,8 @@ def main():
     signal.signal(signal.SIGTERM, handle_exit)
 
     peer.start(register_on_start=False)
-
     time.sleep(0.1)
-    print(f"Tracker: {host}:{port}")
-    print(f"Sharing directory: {peer.shared_dir}")
+    print(f"Server: {host}:{port}")
     print(f"Peer listening on port: {peer.peer_port}")
     print_help()
 
@@ -279,58 +222,26 @@ def main():
                 break
             if not line:
                 continue
-            parts = line.split(maxsplit=2)
+            parts = line.split()
             cmd = parts[0].lower()
-            if cmd in ("exit", "quit"):
+            if cmd == "exit":
                 break
             elif cmd == "help":
                 print_help()
             elif cmd == "register":
+                files_line = input("files (space-separated, leave empty to register none): ").strip()
+                filenames = files_line.split() if files_line else []
                 print("registering...")
-                peer.register()
+                peer.register(filenames)
             elif cmd == "unregister":
                 print("unregistering...")
                 peer.unregister()
-            elif cmd == "list":
-                resp = peer._send_server({"action": "list"})
-                if resp and resp.get("status") == "ok":
-                    files = resp.get("files", [])
-                    for f in files:
-                        print(f)
-                else:
-                    print("failed to list")
-            elif cmd == "peers":
-                if len(parts) < 2:
-                    print("usage: peers <file>")
-                    continue
-                fname = parts[1]
-                peers_list = peer.lookup_file(fname)
-                if not peers_list:
-                    print("no peers")
-                else:
-                    for p in peers_list:
-                        print(f"{p.get('ip')}:{p.get('port')}")
-            elif cmd == "files":
-                for p in peer.shared_dir.iterdir():
-                    if p.is_file():
-                        print(p.name)
             elif cmd == "get":
                 if len(parts) < 2:
                     print("usage: get <file>")
                     continue
                 fname = parts[1]
                 peer.get(fname)
-            elif cmd == "setdir":
-                if len(parts) < 2:
-                    print("usage: setdir <path>")
-                    continue
-                newdir = parts[1]
-                peer.stop()
-                peer = Peer(host, int(port), peer_port=0, shared_dir=newdir)
-                peer.start(register_on_start=False)
-                time.sleep(0.1)
-                print(f"now sharing: {peer.shared_dir}")
-                print(f"peer listening on port: {peer.peer_port}")
             else:
                 print("unknown command, type help")
     finally:

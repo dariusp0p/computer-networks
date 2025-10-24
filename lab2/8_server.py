@@ -3,20 +3,30 @@
 # Clients can request files, and the server connects them to peers
 # that have the requested files. Data transfers happens over TCP.
 
+
 import socket
 import threading
 import json
 import time
 
+
 HOST = "0.0.0.0"
 PORT = 9000
-PEER_TIMEOUT = 300
+PEER_TIMEOUT = 600
 CLEANUP_INTERVAL = 60
 
 lock = threading.Lock()
 peers = {}
 file_index = {}
 
+
+def get_one_peer(filename):
+    with lock:
+        s = file_index.get(filename, set())
+        if not s:
+            return None
+        ip, port = next(iter(s))
+        return {"ip": ip, "port": port}
 
 def register_peer(addr, peer_port, files):
     key = (addr, peer_port)
@@ -37,22 +47,6 @@ def unregister_peer(addr, peer_port):
                     s.discard(key)
                     if not s:
                         file_index.pop(f, None)
-
-def touch_peer(addr, peer_port, files=None):
-    key = (addr, peer_port)
-    now = time.time()
-    with lock:
-        if key in peers:
-            peers[key]["last_seen"] = now
-            if files is not None:
-                old_files = peers[key]["files"]
-                for f in old_files:
-                    file_index.get(f, set()).discard(key)
-                peers[key]["files"] = set(files)
-                for f in files:
-                    file_index.setdefault(f, set()).add(key)
-        else:
-            register_peer(addr, peer_port, files or [])
 
 def lookup_file(filename):
     with lock:
@@ -97,21 +91,16 @@ def handle_client(conn, addr):
                 peer_port = int(msg.get("peer_port", 0))
                 unregister_peer(ip, peer_port)
                 resp = {"status": "ok"}
-            elif action == "announce":
-                peer_port = int(msg.get("peer_port", 0))
-                files = msg.get("files")
-                touch_peer(ip, peer_port, files)
-                resp = {"status": "ok"}
-            elif action == "request":
-                filename = msg.get("file")
+            elif action == "get":
+                filename = msg.get("filename")
                 if not filename:
-                    resp = {"status": "error", "message": "Missing file!"}
+                    resp = {"status": "error", "message": f"File {filename} not found!"}
                 else:
-                    peers_list = lookup_file(filename)
-                    resp = {"status": "ok", "peers": peers_list}
-            elif action == "list":
-                with lock:
-                    resp = {"status": "ok", "peers": list(file_index.keys())}
+                    peer = get_one_peer(filename)
+                    if peer:
+                        resp = {"status": "ok", "peer": peer}
+                    else:
+                        resp = {"status": "error", "message": "File not found!"}
             else:
                 resp = {"status": "error", "message": "Unknown action!"}
 
