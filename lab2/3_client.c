@@ -7,7 +7,6 @@
 // It also sends to each other client the string “You lost !”.
 // The server closes all connections after this.
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +15,7 @@
 #ifdef _WIN32
     #include <WinSock2.h>
     #include <stdint.h>
-    #define closesocket closesocket
+    #define closesocket closesocke
     typedef SOCKET socket_t;
 #else
 #include <sys/types.h>
@@ -52,6 +51,7 @@ int main(int argc, char* argv[]) {
 
     srand((unsigned int)time(NULL));
     crf = (float)rand() / (float)RAND_MAX;
+
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
