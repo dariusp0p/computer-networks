@@ -26,3 +26,5 @@ Makefile
 *.tmp
 
 lab*/cmake-build-debug/*
+
+.venv/

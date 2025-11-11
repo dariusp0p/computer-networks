@@ -6,164 +6,276 @@
 // create a mesh architecture where all clients connect directly between each
 // others.
 
+/*
+ Protocol (over TCP):
+  - Client -> Server: "REGISTER <ip:udp_port>\n"  or "REGISTER <udp_port>\n"
+  - Server -> New client: multiple "PEER <ip:port>\n" followed by "END\n"
+  - Server -> All other clients: "NEW <ip:port>\n" when someone registers
+  - Server -> All clients: "LEFT <ip:port>\n" when someone disconnects
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <strings.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define PORT 9034
+#define MAXBUF 512
+#define MAXPEERS FD_SETSIZE
 
-fd_set master;
-fd_set read_fds;
-struct sockaddr_in myaddr;
-struct sockaddr_in remoteaddr;
-int fdmax;
-int listener;
-int newfd;
-char buf[256], tmpbuf[256];
-int nbytes, ret;
-int yes = 1;
-int addrlen;
-int i, j, crt, int_port, client_count = 0;
+typedef struct {
+    int tcp_fd;
+    char ip[INET_ADDRSTRLEN];
+    int udp_port;
+} peer_t;
 
+static peer_t peers[MAXPEERS];
+static fd_set master, read_fds;
+static int fdmax = 0;
+static int listener = -1;
 
-struct sockaddr_in get_socket_name(int s, int local_or_remote) {
-    struct sockaddr_in addr;
-    int addrlen = sizeof(addr);
-    int ret;
-
-    memset(&addr, 0, sizeof(addr));
-    ret = (local_or_remote == 1 ? getsockname(s, (struct sockaddr *)&addr, (socklen_t*)&addrlen) :
-            getpeername(s, (struct sockaddr *)&addr, (socklen_t*)&addrlen));
-    if (ret < 0)
-        perror("getsock(peer)name");
-    return addr;
-}
-
-
-char* get_ip_address(int s, int local_or_remote) {
-    struct sockaddr_in addr;
-    addr = get_socket_name(s, local_or_remote);
-    return inet_ntoa(addr.sin_addr);
-}
-
-
-int get_port(int s, int local_or_remote) {
-    struct sockaddr_in addr;
-    addr = get_socket_name(s, local_or_remote);
-    return addr.sin_port;
-}
-
-
-void send_to_all(char* buf, int nbytes) {
-    int j, ret;
-    for(j = 0; j <= fdmax; j++) {
-        if (FD_ISSET(j, &master))
-            if (j != listener && j != crt)
-                if ( send(j, buf, nbytes, 0) == -1)
-                    perror("send");
+static void remove_peer(int idx) {
+    if (peers[idx].tcp_fd != -1) {
+        close(peers[idx].tcp_fd);
+        FD_CLR(peers[idx].tcp_fd, &master);
+        peers[idx].tcp_fd = -1;
+        peers[idx].ip[0] = '\0';
+        peers[idx].udp_port = 0;
     }
-    return;
 }
 
+static void broadcast_except(int except_fd, const char *msg, size_t len) {
+    for (int i = 0; i <= fdmax; ++i) {
+        for (int p = 0; p < MAXPEERS; ++p) {
+            if (peers[p].tcp_fd == i && i != except_fd) {
+                ssize_t s = send(i, msg, len, 0);
+                if (s == -1) {
+                    perror("send");
+                    remove_peer(p);
+                }
+                break;
+            }
+        }
+    }
+}
+
+static int find_free_slot(void) {
+    for (int i = 0; i < MAXPEERS; ++i) {
+        if (peers[i].tcp_fd == -1) return i;
+    }
+    return -1;
+}
+
+static void send_peer_list(int dest_fd) {
+    char buf[MAXBUF];
+    for (int i = 0; i < MAXPEERS; ++i) {
+        if (peers[i].tcp_fd != -1) {
+            int n = snprintf(buf, sizeof(buf), "PEER %s:%d\n", peers[i].ip, peers[i].udp_port);
+            if (n > 0) send(dest_fd, buf, n, 0);
+        }
+    }
+    send(dest_fd, "END\n", 4, 0);
+}
+
+static int parse_registration(const char *line, char *out_ip, size_t iplen, int *out_port, int sockfd) {
+    const char *p = line;
+    while (*p == ' ') ++p;
+    if (strncasecmp(p, "REGISTER", 8) != 0) return -1;
+    p += 8;
+    while (*p == ' ') ++p;
+    if (!*p) return -1;
+    char tmp[MAXBUF];
+    strncpy(tmp, p, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    char *nl = strchr(tmp, '\n');
+    if (nl) *nl = '\0';
+    char *colon = strchr(tmp, ':');
+    if (colon) {
+        *colon = '\0';
+        strncpy(out_ip, tmp, iplen - 1);
+        out_ip[iplen - 1] = '\0';
+        *out_port = atoi(colon + 1);
+    } else {
+        struct sockaddr_in addr;
+        socklen_t alen = sizeof(addr);
+        if (getpeername(sockfd, (struct sockaddr *)&addr, &alen) < 0) return -1;
+        if (inet_ntop(AF_INET, &addr.sin_addr, out_ip, iplen) == NULL) return -1;
+        *out_port = atoi(tmp);
+    }
+    if (*out_port <= 0 || *out_port > 65535) return -1;
+    return 0;
+}
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Usage: %s <port number>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <tcp_port>\n", argv[0]);
         exit(1);
     }
 
-    int_port = atoi(argv[1]);
+    int tcp_port = atoi(argv[1]);
+    if (tcp_port <= 0 || tcp_port > 65535) {
+        fprintf(stderr, "Invalid port: %s\n", argv[1]);
+        exit(1);
+    }
+
+    for (int i = 0; i < MAXPEERS; ++i) peers[i].tcp_fd = -1;
 
     FD_ZERO(&master);
     FD_ZERO(&read_fds);
 
-    if ((listener = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        perror("Socket error!");
+    listener = socket(AF_INET, SOCK_STREAM, 0);
+    if (listener == -1) {
+        perror("socket");
         exit(1);
     }
 
-    if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-        perror("Setsockopt error!");
+    int yes = 1;
+    if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1) {
+        perror("setsockopt");
+        close(listener);
         exit(1);
     }
 
+    struct sockaddr_in myaddr;
     memset(&myaddr, 0, sizeof(myaddr));
     myaddr.sin_family = AF_INET;
     myaddr.sin_addr.s_addr = INADDR_ANY;
-    myaddr.sin_port = htons(int_port);
+    myaddr.sin_port = htons((unsigned short)tcp_port);
 
     if (bind(listener, (struct sockaddr *)&myaddr, sizeof(myaddr)) == -1) {
-        perror("Bind error!");
+        perror("bind");
+        close(listener);
         exit(1);
     }
 
     if (listen(listener, 10) == -1) {
-        perror("Listen error!");
+        perror("listen");
+        close(listener);
         exit(1);
     }
 
     FD_SET(listener, &master);
     fdmax = listener;
 
-    for(;;) {
+    printf("Registration server listening on %d\n", tcp_port);
+
+    while (1) {
         read_fds = master;
-        if (select(fdmax + 1, &read_fds, NULL, NULL, NULL) == -1) {
-            perror("Select error!");
-            exit(1);
+        int sel = select(fdmax + 1, &read_fds, NULL, NULL, NULL);
+        if (sel == -1) {
+            if (errno == EINTR) continue;
+            perror("select");
+            break;
         }
 
-        // run through the existing connections looking for data to read
-        for(i = 0; i <= fdmax; i++) {
-            if (FD_ISSET(i, &read_fds)) { // we got one!!
-                crt = i;
-                if (i == listener) {
-                    addrlen = sizeof(remoteaddr);
-                    if ((newfd = accept(listener, (struct sockaddr *)&remoteaddr,(socklen_t*)&addrlen)) == -1) {
-                        perror("accept");
-                    } else {
-                        FD_SET(newfd, &master); // add to master set
-                        if (newfd > fdmax) {    // keep track of the maximum
-                            fdmax = newfd;
+        for (int i = 0; i <= fdmax; ++i) {
+            if (!FD_ISSET(i, &read_fds)) continue;
+
+            if (i == listener) {
+                /* new connection */
+                struct sockaddr_in remote;
+                socklen_t addrlen = sizeof(remote);
+                int newfd = accept(listener, (struct sockaddr *)&remote, &addrlen);
+                if (newfd == -1) {
+                    perror("accept");
+                    continue;
+                }
+                /* read registration line (simple blocking read) */
+                char buf[MAXBUF];
+                ssize_t r = recv(newfd, buf, sizeof(buf) - 1, 0);
+                if (r <= 0) {
+                    close(newfd);
+                    continue;
+                }
+                buf[r] = '\0';
+                char peer_ip[INET_ADDRSTRLEN];
+                int peer_udp = 0;
+                if (parse_registration(buf, peer_ip, sizeof(peer_ip), &peer_udp, newfd) < 0) {
+                    const char *err = "ERROR Invalid REGISTER format\n";
+                    send(newfd, err, strlen(err), 0);
+                    close(newfd);
+                    continue;
+                }
+
+                int slot = find_free_slot();
+                if (slot < 0) {
+                    const char *err = "ERROR Server full\n";
+                    send(newfd, err, strlen(err), 0);
+                    close(newfd);
+                    continue;
+                }
+
+                peers[slot].tcp_fd = newfd;
+                strncpy(peers[slot].ip, peer_ip, sizeof(peers[slot].ip) - 1);
+                peers[slot].ip[sizeof(peers[slot].ip) - 1] = '\0';
+                peers[slot].udp_port = peer_udp;
+
+                FD_SET(newfd, &master);
+                if (newfd > fdmax) fdmax = newfd;
+
+                /* send existing peer list to new client */
+                send_peer_list(newfd);
+
+                /* notify others */
+                char notify[MAXBUF];
+                int n = snprintf(notify, sizeof(notify), "NEW %s:%d\n", peer_ip, peer_udp);
+                broadcast_except(newfd, notify, (size_t)n);
+
+                printf("Registered %s:%d (tcp fd %d)\n", peer_ip, peer_udp, newfd);
+
+            } else {
+                /* data from existing client or disconnect */
+                char buf[MAXBUF];
+                ssize_t nbytes = recv(i, buf, sizeof(buf) - 1, 0);
+                if (nbytes <= 0) {
+                    /* disconnect */
+                    if (nbytes == 0) {
+                        /* find which peer */
+                        for (int p = 0; p < MAXPEERS; ++p) {
+                            if (peers[p].tcp_fd == i) {
+                                char notify[MAXBUF];
+                                int len = snprintf(notify, sizeof(notify), "LEFT %s:%d\n", peers[p].ip, peers[p].udp_port);
+                                broadcast_except(i, notify, (size_t)len);
+                                printf("Peer %s:%d disconnected (fd %d)\n", peers[p].ip, peers[p].udp_port, i);
+                                remove_peer(p);
+                                break;
+                            }
                         }
-                        printf("selectserver: new connection from %s on "
-                            "socket %d\n", get_ip_address(newfd, 0), newfd);
-                        client_count++;
-                        sprintf(buf,"Hi-you are client :[%d] (%s:%d) connected to server %s\nThere are %d clients connected\n",
-                            newfd, get_ip_address(newfd, 0), get_port(newfd, 0),
-                            get_ip_address(listener, 1), client_count);
-                        send(newfd,buf,strlen(buf)+1,0);
+                    } else {
+                        perror("recv");
                     }
                 } else {
-                    if ((nbytes = recv(i, buf, sizeof(buf), 0)) <= 0) {
-                        if (nbytes == 0) {
-                            printf("<selectserver>: client %d forcibly hung up\n", i);
-                        } else perror("recv");
-                        client_count--;
-                        close(i);
-                        FD_CLR(i, &master);
-                    } else {
-                        buf[nbytes]=0;
-                        if ((strncasecmp("QUIT\n",buf,4) == 0)) {
-                            sprintf(buf, "Request granted [%d] - %s. Disconnecting...\n", i, get_ip_address(i, 0));
-                            send(i, buf, strlen(buf)+1,0);
-                            nbytes = sprintf(tmpbuf, "<%s - [%d]> disconnected\n", get_ip_address(i, 0), i);
-                            send_to_all(tmpbuf, nbytes);
-                            client_count--;
-                            close(i);
-                            FD_CLR(i, &master);
-                        } else {
-                            nbytes = sprintf(tmpbuf, "<%s - [%d]> %s",get_ip_address(crt, 0),crt, buf);
-                            send_to_all(tmpbuf, nbytes);
+                    buf[nbytes] = '\0';
+                    /* optionally handle in-band commands like QUIT */
+                    if (strncasecmp(buf, "QUIT", 4) == 0) {
+                        for (int p = 0; p < MAXPEERS; ++p) {
+                            if (peers[p].tcp_fd == i) {
+                                char notify[MAXBUF];
+                                int len = snprintf(notify, sizeof(notify), "LEFT %s:%d\n", peers[p].ip, peers[p].udp_port);
+                                broadcast_except(i, notify, (size_t)len);
+                                printf("Peer %s:%d requested QUIT (fd %d)\n", peers[p].ip, peers[p].udp_port, i);
+                                remove_peer(p);
+                                break;
+                            }
                         }
+                    } else {
+                        /* ignore other messages - server is only registry */
+                        const char *ack = "OK\n";
+                        send(i, ack, strlen(ack), 0);
                     }
                 }
             }
-        }
+        } /* for i..fdmax */
     }
+
+    /* cleanup */
+    for (int p = 0; p < MAXPEERS; ++p) if (peers[p].tcp_fd != -1) close(peers[p].tcp_fd);
+    if (listener != -1) close(listener);
     return 0;
 }

@@ -2,6 +2,14 @@
 // File: `lab3/4_client_windows.c`
 #define _WINSOCK_DEPRECATED_NO_WARNINGS 1
 
+// 4. Implement the Chat server example (see the link bellow) using UDP and TCP
+// –only this time each client should contact the server just for registration.
+// All communication happens directly between the peers (clients) without
+// passing trough the server. Each client maintains an endpoint (TCP/UDP) with
+// the server just for learning the arrival/departure of other clients. You
+// create a mesh architecture where all clients connect directly between each
+// others.
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <stdio.h>
